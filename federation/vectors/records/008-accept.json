@@ -1,0 +1,22 @@
+{
+  "description": "accept names the offer and its author; nothing in it is sealed.",
+  "input": {
+    "now": 1767312100,
+    "record": {
+      "v": 1,
+      "kind": "accept",
+      "key": "q6-YSQOwroLpff9kQ8staCV6h0Hy9ioi8qHnRU_PWMw",
+      "t": 1767312000,
+      "body": {
+        "offer": "0aRkg_TKp3BppwdHTJ5LNZt-q6Vzj7QE0NRuY64kCMU",
+        "to": "BydB2y9zLsGpT8g9cHZpqQcvinn8wjSheFzYHQLCSz0"
+      },
+      "sig": "g_9ia2Si07Mbd0qDCooxAO3OB2E5SCuKtM-lHUjHP9AVFsHwuvXrw7Tg8OZZmFIHG_-Sko7m13jngiS4qWX3Bw"
+    }
+  },
+  "expect": {
+    "ok": true,
+    "kind": "accept",
+    "id": "ZKevEwVXdi6EG08LUvZLDz0cveesTXzL1d7q7p7di2k"
+  }
+}

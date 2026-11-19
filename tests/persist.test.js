@@ -1,0 +1,125 @@
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const path = require('node:path');
+const { execFileSync } = require('node:child_process');
+const { load } = require('./harness');
+
+const OUT = require('node:fs').mkdtempSync(require('node:path').join(require('node:os').tmpdir(), 'tubes-build-'));
+const { lit } = require('../scripts/lib/js-literal');
+const root = path.join(__dirname, '..');
+
+function playedGame() {
+  const a = load();
+  a.ev("ACT.start({});ACT.launchBB({city:'fra'});for(let i=0;i<25;i++)dayTick();UI.speed=2;save()");
+  return { a, saved: a.ev("slotRaw(UI.slot)"), day: a.ev('S.day') };
+}
+
+test('leaving the page saves the game', () => {
+  const a = load();
+  a.ev("ACT.start({});for(let i=0;i<7;i++)dayTick();localStorage.removeItem(SLOT_K+UI.slot)");
+  a.ev("dispatchEvent(new Event('pagehide'))");
+  assert.equal(JSON.parse(a.ev("slotRaw(UI.slot)")).day, a.ev('S.day'));
+});
+
+test('a save too big for the browser is not retried every few seconds, but leaving still tries', () => {
+  const a = load();
+  // A storage that counts tries and refuses the game save, like a full quota.
+  a.ev(`window.__tries=0;window.__full=true;const P=Object.getPrototypeOf(localStorage),set=P.setItem;
+    P.setItem=function(k,v){if(k.startsWith('sot-save-v1')){__tries++;if(__full){const e=new Error('full');e.name='QuotaExceededError';throw e;}}return set.call(this,k,v);};
+    ACT.start({});for(let i=0;i<7;i++)dayTick();__tries=0;UI.saveFail=null;save()`);
+  assert.equal(a.ev('__tries'), 1);
+  a.ev('save();save();after()');
+  assert.equal(a.ev('__tries'), 1, 'autosaves wait after a failure');
+  a.ev("dispatchEvent(new Event('pagehide'))");
+  assert.equal(a.ev('__tries'), 2, 'leaving the page still tries');
+  assert.equal(a.ev('UI.saveFail.wait'), 120000, 'and each failure waits longer');
+  a.ev('__full=false;UI.saveFail.at-=120001;save()');
+  assert.equal(a.ev('__tries'), 3, 'tried again once the wait is over');
+  assert.equal(JSON.parse(a.ev("slotRaw(UI.slot)")).day, a.ev('S.day'));
+  assert.equal(a.ev('UI.saveFail'), null);
+  a.ev('S.cash++;save()');
+  assert.equal(a.ev('__tries'), 4, 'a save that works keeps saving every time the network changes');
+  a.ev('save();save()');
+  assert.equal(a.ev('__tries'), 4, 'and writes nothing while nothing changes');
+  a.ev('__full=true;S.cash++;save();S=migrate(JSON.parse(JSON.stringify(S)));S.cash++;save()');
+  assert.equal(a.ev('__tries'), 6, 'another game (a new state) tries at once');
+});
+
+test('customer names already used are remembered once each, and old saves shrink on load', () => {
+  const { ev, errors } = load();
+  ev("ACT.start({});S.usedNames=['A','B','A','A',7,'B'];S=migrate(JSON.parse(JSON.stringify(S)))");
+  assert.deepEqual(JSON.parse(ev('JSON.stringify(S.usedNames)')), ['A', 'B']);
+  ev("for(let i=0;i<400;i++)dayTick()");
+  const u = JSON.parse(ev('JSON.stringify(S.usedNames)'));
+  assert.equal(new Set(u).size, u.length, 'no name twice');
+  assert.deepEqual(errors, []);
+});
+
+test('returning players see what is new after an update, once', () => {
+  const { saved } = playedGame();
+  execFileSync(process.execPath, ['scripts/build.js'], { cwd: root, env: { ...process.env, OUT, VERSION: '1.1.0', BUILD_DATE: '2026-10-23' } });
+  const file = path.join(OUT, 'index.html');
+  const b = load({ file, storage: { 'sot-save-v1': saved, 'sot-seen-version': '1.0.0' } });
+  const text = b.ev("document.getElementById('modalCard').textContent");
+  assert.match(text, /New in Quantum Relay 1\.1\.0/);
+  assert.match(text, /Spätzle-IX/);
+  assert.equal(b.ev("localStorage.getItem('sot-seen-version')"), '1.1.0');
+  const c = load({ file, storage: { 'sot-save-v1': saved, 'sot-seen-version': '1.1.0' } });
+  assert.equal(c.ev("document.getElementById('modal').hidden"), true, 'not shown again');
+});
+
+test('#46 an update that adds networks gives a courtesy route, and Tier 1 is shown only while it is true', () => {
+  const { ev, errors } = load();
+  ev("ACT.start({});S.cash=1e8;for(const g of GOALS)S.done[g.id]=0;ACT.launchBB({city:'fra'});ACT.buyTransit({city:'fra',net:'cog',tier:1});compute()");
+  assert.ok(ev('R.reach') > 0.99);
+  assert.ok(Array.isArray(JSON.parse(ev('JSON.stringify(S.seen)'))), 'new games remember which networks existed');
+  // a transit-free network that has never heard of two of today's networks
+  ev("S.transit=[];S.day=400;S.seen=S.seen.filter(id=>id!=='btt'&&id!=='sky');const s=JSON.parse(JSON.stringify(S));S=migrate(s);compute()");
+  assert.deepEqual(JSON.parse(ev('JSON.stringify(S.grace.nets.sort())')), ['btt', 'sky']);
+  assert.equal(ev('S.grace.until'), 460);
+  assert.equal(ev('R.reachable.btt'), true, 'the courtesy route reaches a network from the update');
+  assert.equal(ev('R.reachable.cog'), false, 'but not networks the player already knew about');
+  ev('S.day=461;compute()');
+  assert.equal(ev('R.reachable.btt'), false, 'it ends after 60 days');
+  // a save from before this change, with no record at all, gets the grace for everything it cannot reach
+  ev("S.day=10;delete S.seen;delete S.grace;S=migrate(JSON.parse(JSON.stringify(S)));compute()");
+  assert.ok(ev('S.grace.nets.length') > 50);
+  assert.ok(ev('R.reach') > 0.99, 'nothing drops overnight');
+  // Tier 1 is a state, not a trophy
+  ev("S.won=true;S.t1Now=true;S.grace=null;compute()");
+  assert.notEqual(ev('tierLabel()'), 'Tier 1');
+  ev("window.__t=[];const _t=toast;toast=(h,...a)=>{window.__t.push(h);return _t(h,...a);};dayTick()");
+  assert.match(ev("window.__t.join(' ')"), /no longer Tier 1/);
+  assert.equal(ev("BADGES.find(b=>b.id==='t1').ok()"), true, 'the badge stays');
+  assert.deepEqual(errors, []);
+});
+
+test('in-app release notes stay short and link to the full notes on GitHub; versions compare as numbers', () => {
+  const { ev, errors } = load();
+  assert.equal(ev("newerVer('1.2.0','1.1.0')"), true);
+  assert.equal(ev("newerVer('1.10.0','1.9.3')"), true);
+  assert.equal(ev("newerVer('1.1.0','1.1.0')"), false);
+  assert.equal(ev("newerVer('1.0.9','1.1.0')"), false);
+  const long = ['Tier 1 networks can lay their own subsea cable (#22). Pick two cities with a landing station, pay a lot, wait.',
+    'Short one.', 'A 1.6T wave is now cheaper. More text here.', 'Four.', 'Five.', 'Six.', 'Seven.'];
+  const h = ev(`notesHtml(${lit(long)},'9.9.9')`);
+  assert.match(h, /lay their own subsea cable \(#22\)\./);
+  assert.doesNotMatch(h, /Pick two cities/, 'only the first sentence');
+  assert.match(h, /A 1\.6T wave is now cheaper\./, 'decimals do not end a sentence');
+  assert.match(h, /and 2 more changes/);
+  assert.match(h, /releases\/tag\/v9\.9\.9/, 'links to the full notes');
+  const short = ev(`notesHtml(${lit(['One fix.', 'Another fix.'])},'9.9.9')`);
+  assert.doesNotMatch(short, /releases\/tag/, 'short notes need no link');
+  assert.equal(ev(`slimNote('${'x'.repeat(300)}')`).length <= 140, true);
+  assert.deepEqual(errors, []);
+});
+
+test('the big-network benchmark save loads cleanly and routes traffic', () => {
+  const fs = require('node:fs'), path = require('node:path');
+  const save = fs.readFileSync(path.join(__dirname, 'fixtures', 'big-network.json'), 'utf8');
+  const { ev, errors } = load();
+  ev(`S=migrate(JSON.parse(${lit(save)}));UI.started=true;compute();renderAll()`);
+  assert.ok(ev('Object.keys(S.pops).length') >= 100 && ev('S.pni.length') >= 900 && ev('S.caches.length') >= 800, 'still a big network');
+  assert.ok(ev('R.served') > 10000, 'and it carries traffic');
+  assert.deepEqual(errors, []);
+});

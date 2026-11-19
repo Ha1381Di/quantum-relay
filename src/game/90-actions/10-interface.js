@@ -1,0 +1,89 @@
+/* ================= ACTIONS ================= */
+function spend(c){if(S.cash<c){toast(tr('interface.not_enough_cash_wait_for_revenue'),'bad');sfx('err');return false;}S.cash-=c;sfx('build');return true;}
+const ACT={
+ linkCheck:({id})=>{const l=S.links.find(x=>x.id===id);if(!l||linkDown(l))return;linkCheckModal(l);},
+ speed:({v})=>{v=+v;if(pzOn()||UI.clockLocked)return;if(![0,0.5,1,2,4,8].includes(v)||(S&&!rule('clock')&&v))return;if(v)UI.lastSpeed=v;UI.speed=v;renderHUD();},
+ help:()=>showHelp(),
+ dash:()=>{if(!S||pzOn())return;const d=$('dash');d.hidden=!d.hidden;if(!d.hidden){renderDash();winIn($('dashCard'));}else winBack();},
+ dashClose:()=>{$('dash').hidden=true;winBack();},
+ dashTab:({k})=>{if(k==='infra')k='links';if(!DTABS.includes(k))return;UI.dtab=k;renderDash();const d=$('dash');if(d)d.scrollTop=0;},
+ dashSort:({k})=>{if(!['name','asn','type','traffic','cost','lost'].includes(k))return;listReset('traffic');if(UI.dashSort===k)UI.dashDir=-(UI.dashDir||-1);else{UI.dashSort=k;UI.dashDir=k==='name'||k==='type'||k==='asn'?1:-1;}renderDash();},
+ bank:()=>{if(!S||pzOn())return;UI.confirm=null;$('dash').hidden=true;const b=$('bankBox');b.hidden=false;UI._bh=null;UI.bankOpen={};renderBank();winIn($('bankCard'));},
+ bankClose:()=>{UI.confirm=null;$('bankBox').hidden=true;winBack();},
+ // The bank's folds (the rating's reasons, a loan's kept conditions): view state only.
+ bankFold:({k})=>{if(!S||typeof k!=='string'||k.length>40)return;UI.bankOpen=UI.bankOpen||{};UI.bankOpen[k]=!UI.bankOpen[k];renderBank();},
+ takeLoan:({id})=>{const o=S.loanOffers.find(x=>x.id===id);if(!o)return;S.stats.loans=(S.stats.loans||0)+1;const B=BANKS[o.bank];let got=o.amount,note='';
+   if(B.crypto){const f=0.55+Math.random()*0.8;got=Math.round(o.amount*f);note=' '+(f>=1?tr('interface.tubecoin_moved_up_p_on_the',{p:Math.round(Math.abs(f-1)*100)}):tr('interface.tubecoin_moved_down_p_on_the',{p:Math.round(Math.abs(f-1)*100)}));}
+   S.cash+=got;S.loanOffers=S.loanOffers.filter(x=>x!==o);
+   S.loans.push({id:o.id,bank:o.bank,start:S.day,amount:o.amount,got,bal:o.model==='transit'?o.owe:o.amount,apr:o.apr||0,apr0:o.apr||0,pay:o.pay||0,left:o.term||0,term:o.term||0,share:o.share||0,model:o.model,cut:o.cut,covs:o.covs,base:{sub:S.links.filter(x=>x.sub).length}});
+   track('loan_taken');toast(`<b>${tr('interface.amt_from_bank_has_landed',{amt:fmt$(got),bank:esc(B.name)})}</b><br>${B.equity?tr('interface.they_now_own_p_of_your',{p:pct(o.share)}):loanSummary(o)}${note}`,'good');sfx('coin');after();renderBank();},
+ callBank:({amount})=>{if(!callOffer(amount))return;track('loan_called');sfx('click');renderBank();renderHUD();save();},
+ declineLoan:({id})=>{S.loanOffers=S.loanOffers.filter(x=>x.id!==id);sfx('click');renderBank();renderHUD();save();},
+ repayLoan:({id})=>{const l=S.loans.find(x=>x.id===id);if(!l)return;const B=BANKS[l.bank];const cost=repayCost(l,B);
+   if(UI.confirm!==id){UI.confirm=id;renderBank();return;}UI.confirm=null;if(!spend(cost)){renderBank();return;}S.loans=S.loans.filter(x=>x!==l);track('loan_repaid');
+   toast(B.equity?tr('interface.you_bought_out_bank_they_flew',{bank:esc(B.name)}):tr('interface.loan_from_bank_repaid_early',{bank:esc(B.name)}),'good');after();renderBank();},
+ leaseSwap:({a,b,src})=>{if(!S.pops[a]||!S.pops[b]||a===b)return;$('dash').hidden=true;UI.lmode='df';UI.dfSrc=['lease','build','cable'].includes(src)?src:isSub(a,b)?'cable':'build';UI.dfSys=glassLvl()>=3?'roadm':'lite';openLinkModal(a,b);},
+ // bg: a tap on a dashboard row picks it in the side panel behind the dashboard, which stays open; Open goes there.
+ dashLink:({id,bg})=>{if(!S.links.some(l=>l.id===id))return;if(!bg)$('dash').hidden=true;selectLink(id);focusLink(id);if(bg)renderDash();},
+ dashPop:({city,bg})=>{if(!S.pops[city])return;if(!bg)$('dash').hidden=true;ACT.focusCity({city});UI.tab='links';renderPanel();if(bg)renderDash();},
+ mapSet:({v})=>{if(!['auto','2d'].includes(v))return;mapGl(v==='auto');refreshSettings();},
+ themeSet:({v})=>{if(!THEMES.includes(v))return;UI.theme=v;try{localStorage.setItem('sot-theme',v);}catch(e){}applyTheme();refreshSettings();},
+ animSet:({v})=>{if(!['auto','on','off'].includes(v))return;UI.anim=v;try{localStorage.setItem('sot-anim',v);}catch(e){}applyAnim();refreshSettings();},
+ soundSet:({v})=>{UI.muted=v==='off';try{localStorage.setItem('sot-mute',UI.muted?'1':'0');}catch(e){}renderHUD();refreshSettings();},
+ langSet:({v})=>{if(!Object.hasOwn(LANGS,v)||v===LANG)return;try{localStorage.setItem('sot-lang',v);}catch(e){}save(true);location.reload();},
+ mute:()=>{UI.muted=!UI.muted;try{localStorage.setItem('sot-mute',UI.muted?'1':'0');}catch(e){}renderHUD();const t=document.querySelector('#modalCard .mtile.snd');if(t){t.outerHTML=soundTile();const n=document.querySelector('#modalCard .mtile.snd');if(n)n.focus({preventScroll:true});}sfx('click');},
+ closePanel:()=>{UI.sel=null;UI.confirm=null;renderPanel();renderLeft();},
+ closeModal:()=>closeModal(),
+ tab:({t})=>{UI.tab=t;UI.confirm=null;renderPanel();},
+ leftTab:({t})=>{const ch=UI.left!==t;UI.left=t;UI.leftOpen=true;renderLeft();if(ch)leftTop();},
+ netFocus:({id})=>{if(!NET[id])return;$('dash').hidden=true;UI.netFocus=id;UI.nf='all';UI.left='nets';UI.leftOpen=true;UI.sel=null;renderPanel();renderLeft();const b=$('leftBody');if(b)b.scrollTop=0;},
+ netFilter:({f})=>{UI.nf=f==='out'?'out':'all';listReset('nets');UI.nlQ='';UI.nlT='';UI.nlOpen=null;UI.netFocus=null;$('dash').hidden=true;UI.left='nets';UI.leftOpen=true;UI.sel=null;renderPanel();renderLeft();const b=$('leftBody');if(b)b.scrollTop=0;},
+ meetGo:({city})=>{if(!isCity(city))return;$('dash').hidden=true;ACT.focusCity({city});if(S.pops[city]){UI.tab='peer';renderPanel();}},
+ toggleLeft:()=>{UI.leftOpen=!UI.leftOpen;renderLeft();},
+ phoneTab:({t})=>{if(!['goals','deals','noc','nets'].includes(t))return;if($('modal').classList.contains('link-check'))closeModal();haptic(8);const ch=UI.left!==t;if(UI.leftOpen&&UI.left===t&&!UI.sel){UI.leftOpen=false;}else{UI.left=t;UI.leftOpen=true;UI.sel=null;renderPanel();}$('left').classList.remove('full');renderLeft();if(ch)leftTop();},
+ phonePlay:()=>{if(playPause())haptic(10);},
+ phoneSpeed:()=>{if(pzOn()||UI.clockLocked)return;if(S&&!rule('clock'))return;haptic(8);const cur=UI.speed||UI.lastSpeed||1,i=SPEEDS.indexOf(cur),n=SPEEDS[(i+1)%SPEEDS.length];UI.speed=n;UI.lastSpeed=n;renderHUD();},
+ install:()=>{if(installEvt){installEvt.prompt();installEvt.userChoice.finally(()=>{installEvt=null;});return;}
+   openModal(pitchHtml(false));},
+ installHide:()=>{installCard=false;try{localStorage.setItem('sot-install-card','x');}catch(e){}if(!UI.started&&!$('modal').hidden&&$('nmIn'))showTitle();},
+ pitchSkip:()=>{const p=UI.pendGame;UI.pendGame=null;UI.pitched=true;if(p)beginGame(...p);else closeModal();},
+ logOpen:({id})=>{const e=(S.log||[]).find(x=>x.id===id),o=e&&e.o;if(!o)return;$('dash').hidden=true;closeModal();
+  if(o.a==='city'&&isCity(o.v)){ACT.focusCity({city:o.v});return;}
+  if(o.a==='link'){if(S.links.some(l=>l.id===o.v)){ACT.selLink({id:o.v});return;}toast(tr('interface.that_link_is_gone_it_was'),'');return;}
+  if(o.a==='cust'){if(S.biz.some(b=>b.id===o.v)){ACT.custGo({id:o.v});return;}toast(tr('interface.that_customer_is_gone_the_contract'),'');return;}
+  if(o.a==='bank'){ACT.bank({});return;}if(o.a==='ops'){ACT.opsOpen();return;}if(o.a==='optx'){ACT.optxOpen();return;}
+  if(o.a==='badges'){ACT.badgesOpen();return;}
+  if(o.a==='tab'&&LOG_TABS.includes(o.v))ACT.leftTab({t:o.v});},
+ // A badge (its toast, or its note in the NOC log) opens the wall of badges itself: unfolded and scrolled to, not just the Goals tab above it.
+ badgesOpen:()=>{if(!S)return;for(const t of document.querySelectorAll('#toasts .btoast'))t.remove();$('dash').hidden=true;UI.fold=UI.fold||{};UI.fold.badges=true;
+  if(isPhone()){UI.sel=null;renderPanel();$('left').classList.remove('full');}ACT.leftTab({t:'goals'});const h=document.querySelector('#leftBody .bhead');if(h&&h.scrollIntoView)h.scrollIntoView({block:'start'});},
+ logAll:()=>{UI.logAll=!UI.logAll;renderLeft();},
+ logKind:({k})=>{UI.logKind=k==='all'?null:k==='info'?'':LOG_KINDS.includes(k)?k:null;renderLeft();},
+ leftFold:({k})=>{if(!LEFT_FOLDS.includes(k))return;UI.fold=UI.fold||{};UI.fold[k]=!UI.fold[k];renderLeft();},
+ findOpen:()=>findOpen(),
+ findGo:({city})=>{if(!isCity(city))return;closeModal();$('dash').hidden=true;ACT.focusCity({city});},
+ // A result of the find box: close it, remember the pick for next time, and go there with the action its screen already has.
+ findPick:({k,id})=>{const e=S&&UI.started?findObj(k,id):null;if(!e||(k==='go'&&e.o.act))return;const o=e.o;closeModal();
+  UI.findRecent=[{k,id},...(UI.findRecent||[]).filter(r=>r.k!==k||r.id!==id)].slice(0,FIND_CAP);
+  if(k==='city')ACT.findGo({city:id});
+  else if(k==='net'){ACT.netFocus({id});if(isPhone())$('left').classList.remove('full');}
+  else if(k==='cust')ACT.custGo({id});
+  else if(k==='offer'){if(!isCity(o.city))return;$('dash').hidden=true;ACT.focusCity({city:o.city});UI.offerAt=o.id;if(S.pops[o.city])UI.tab='cust';renderPanel();}
+  else if(k==='link'){$('dash').hidden=true;ACT.selLink({id});}
+  else if(o.dt){$('dash').hidden=true;ACT.dash();if(!$('dash').hidden)ACT.dashTab({k:o.dt});}
+  else if(o.lt){$('dash').hidden=true;if(!isPhone())ACT.leftTab({t:o.lt});else if(!(UI.leftOpen&&UI.left===o.lt&&!UI.sel))ACT.phoneTab({t:o.lt});}
+  else if(o.bank)ACT.bank();},
+ findMore:({g})=>{if(!FIND_G.includes(g)||$('modal').hidden||!$('findIn'))return;UI.findMore=g;findDraw();},
+ // A link from one of your POPs to a city you type instead of dragging to (#343): the same window the drag opens.
+ findLink:({city})=>{if(!isCity(city)||!S.pops[city]||pzOn())return;findOpen(city);},
+ linkTo:({a,b})=>{if(!isCity(a)||!isCity(b)||a===b||pzOn()||!linkFromOk(a)||!linkToOk(b))return;$('dash').hidden=true;sfx('click');openLinkModal(a,b);},
+ focusCity:({city})=>{selectCity(city);const C=CITY[city];cam.x=C.x;cam.y=C.y;cam.z=Math.max(cam.z,1.2);if(innerWidth<760)UI.leftOpen=false;renderLeft();},
+ popStep:({d})=>{const L=popOrder(),n=L.length;if(!n)return;const i=UI.sel&&UI.sel.type==='city'?L.indexOf(UI.sel.id):-1;$('dash').hidden=true;ACT.focusCity({city:L[i<0?(d>0?0:n-1):(i+(d>0?1:n-1))%n]});},
+ // The offer stays marked in its city's Offers here until something else is selected, so two offers in one city each get a press.
+ offerStep:()=>{const L=offerOrder(),n=L.length;if(!n){toast(tr('hud_and_panels.no_open_offers_right_now_businesses'));return;}
+  const i=L.findIndex(o=>o.id===UI.offerAt),o=L[(i+1)%n];$('dash').hidden=true;ACT.focusCity({city:o.city});UI.offerAt=o.id;if(S.pops[o.city])UI.tab='cust';renderPanel();
+  const r=document.querySelector('#panelBody .row.on');if(r&&r.scrollIntoView)r.scrollIntoView({block:'nearest'});},
+ zoomStep:({d})=>zoomAt(CW/2,CH/2,d>0?1.25:0.8),
+ keys:()=>showKeys(),
+ selLink:({id})=>{selectLink(id);focusLink(id);},
+};

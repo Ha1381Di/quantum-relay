@@ -1,0 +1,38 @@
+function utilityKitHtml(city,modal=false){const q=utilityKit(city);if(!q)return '';const p=S.pops[city];
+  const row=(label,have)=>`<div class="kv"><span>${label}</span><b>${have?tr('common.installed'):tr('common.none_304f')}</b></div>`;
+  return `<section><h3>${tr('utilities.redundancy_kit')}</h3>
+    ${row(tr('common.backup_generator'),p.gen)}${row(tr('utilities.second_site'),p.site2)}${row(tr('utilities.two_routers'),(p.routers||1)>=2)}
+    <p class="meta">${tr('utilities.cache_moves',{n:q.moves.length})}</p>
+    ${q.cost||q.moves.length?`<p class="meta">${tr('utilities.kit_cost',{cost:fmt$(q.cost),mo:fmt$(q.mo)})}</p><div class="btns">${btn(tr('utilities.apply_kit'),'utilityKit',{city,cost:q.cost,modal},'pink',q.cost>0&&S.cash<q.cost)}</div>`:`<p class="meta">${tr('utilities.kit_balanced')}</p>`}
+    <p class="note">${tr('utilities.redundancy_note')}</p></section>${utilityCachesHtml(city,modal)}`;}
+// In the Infra tab (#192): one row with its buttons, since the generator, second site, routers and caches each have
+// their own rows below; the full kit with its caches is in Utilities.
+function utilityKitLine(city){const q=utilityKit(city);if(!q)return '';const todo=q.cost||q.moves.length,m=q.moves.length;
+  return `<section class="kitl"><div class="row"><div class="grow"><div class="nm">${tr('utilities.redundancy_kit')}</div><div class="meta">${todo?(m?trn('utilities.kit_line_moves',m,{cost:fmt$(q.cost),mo:fmt$(q.mo)}):tr('utilities.kit_line',{cost:fmt$(q.cost),mo:fmt$(q.mo)})):tr('utilities.kit_balanced')}</div></div>
+    ${todo?btn(tr('utilities.apply'),'utilityKit',{city,cost:q.cost},'pink sm',q.cost>0&&S.cash<q.cost,tr('utilities.apply_kit')):''}${btn(tr('utilities.title'),'utilities',{city},'ghost sm')}</div></section>`;}
+function utilityCachesHtml(city,modal=false){const q=utilityCaches(city);if(!q)return '';
+  return `<section><h3>${tr('common.embedded_caches')}</h3><p class="lead">${tr('utilities.cache_note')}</p>
+    <p class="meta">${tr('utilities.cache_quote',{n:q.add.length,mo:fmt$(q.mo)})}</p>
+    ${q.free+1e-9<q.ports?`<p class="why">${tr('utilities.cache_ports',{need:q.ports,free:fmtPorts(q.free)})}</p>`:''}
+    <div class="btns">${btn(tr('utilities.request_caches',{n:q.add.length}),'utilityCaches',{city,quote:q.key,modal},'pink',!q.add.length||q.free+1e-9<q.ports)}</div></section>`;}
+function utilitiesModal(city,message){if(!S)return;const cities=Object.keys(S.pops).sort((a,b)=>CITY[a].name.localeCompare(CITY[b].name));
+  city=S.pops[city]?city:UI.sel&&UI.sel.type==='city'&&S.pops[UI.sel.id]?UI.sel.id:S.pops[S.home]?S.home:cities[0];
+  const rows=utilityPeers(),n=rows.reduce((v,r)=>v+r.requests.length,0),rs=utilityRouteServers().length;
+  openModal(`<div style="display:flex;align-items:center"><h2 style="font-size:26px">${tr('utilities.title')}</h2><button class="x" data-act="closeModal" aria-label="${tr('common.close')}">×</button></div>
+    ${message?`<p role="status" class="note">${esc(message)}</p>`:''}
+    <section><h3>${tr('utilities.ix_peering')}</h3><p class="lead">${tr('utilities.peering_note')}</p>
+    <div class="btns">${btn(tr('utilities.join_route_servers',{n:rs}),'utilityRouteServers',{city},'pink',!rs)}${btn(tr('utilities.request_all',{n}),'utilityPeers',{city},'',!n)}</div>
+    <p class="meta">${tr('utilities.route_server_note')}</p>
+    ${ppol()!=='open'?`<p class="why">${tr('link_panels.off_while_your_peering_policy_is',{pol:tr(PPOL_N[ppol()])})}</p>${btn(tr('common.peering_policy'),'leftTab',{t:'nets'},'ghost sm')}`:''}
+    ${rows.map(r=>`<details><summary>${esc(ixName(r.ix))} · ${tr('utilities.peer_counts',{ready:r.requests.length,existing:r.existing,blocked:r.blocked.length})}</summary>
+      ${r.blocked.map(b=>`<p class="meta"><b>${esc(NET[b.id].name)}</b>: ${esc(b.why)}</p>`).join('')}</details>`).join('')}</section>
+    ${utilityKitAllHtml(city)}${popTierAllHtml(city)}
+    ${cities.length?`<section><label for="utilityCity">${tr('common.your_pop')}</label><div class="btns"><select id="utilityCity" style="max-width:100%">${cities.map(c=>`<option value="${c}"${c===city?' selected':''}>${esc(CITY[c].name)}</option>`).join('')}</select>${btn(tr('utilities.view_pop'),'utilityPick',{},'sm')}</div></section>${utilityKitHtml(city,true)}`:''}`);
+}
+// The kit everywhere (#317), and where new POPs get it: the intern's template, which the intern clicks through.
+function utilityKitAllHtml(city){const q=utilityKitAll();if(!q)return '';const tpl=opsHired()&&S.ops.tpl.kit;
+  return `<section><h3>${tr('utilities.kit_everywhere')}</h3><p class="lead">${tr('utilities.kit_everywhere_note')}</p>
+    ${q.cities.length?`<p class="meta">${trn('utilities.kit_all_quote',q.cities.length,{cost:fmt$(q.cost),mo:fmt$(q.mo)})}${q.moves?' · '+tr('utilities.cache_moves',{n:q.moves}):''}</p>
+    <div class="btns">${btn(trn('utilities.kit_all_apply',q.cities.length,{cost:fmt$(q.cost)}),'utilityKitAll',{cost:q.cost,city},'pink',S.cash<q.cost)}</div>`:`<p class="meta">${tr('utilities.kit_all_done')}</p>`}
+    <p class="note">${opsHired()?(tpl?tr('utilities.kit_new_pops_on',{name:opsName()}):tr('utilities.kit_new_pops_off',{name:opsName()})):tr('utilities.kit_new_pops_hire')}</p>
+    ${opsHired()?`<div class="btns">${btn(tpl?tr('utilities.kit_new_pops_stop'):tr('utilities.kit_new_pops_start'),'utilityKitNew',{city},tpl?'ghost sm':'sm')}</div>`:''}</section>`;}
