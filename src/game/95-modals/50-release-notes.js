@@ -14,6 +14,6 @@ function checkUpdate(){
   if(IS_DEV||location.protocol==='file:'||!window.fetch)return;const now=Date.now();if(now-(UI.updChecked||0)<60000)return;UI.updChecked=now;
   fetch('/version.json',{cache:'no-store'}).then(r=>r.ok?r.json():null).then(j=>{
     if(!j||!j.version||!newerVer(j.version,APP_VERSION))return;if(UI.updLater&&now-UI.updLater<6*3600*1000)return;
-    const top=(j.notes||[])[0]||'';$('update').innerHTML=`<div class="tx"><b>${tr('release_notes.series_of_tubes_v_is_out',{v:esc(j.version)})}</b>${top?`<br>${esc(top.length>120?top.slice(0,117)+'…':top)}`:''}<br><span class="meta">${tr('release_notes.your_game_is_saved_automatically')}</span></div>${btn(tr('common.reload_now'),'updateNow',{},'pink sm')}${btn(tr('common.later'),'updateLater',{},'ghost sm')}`;$('update').hidden=false;
+    const top=(j.notes||[])[0]||'';$('update').innerHTML=`<div class="tx"><b>${tr('release_notes.quantum_relay_v_is_out',{v:esc(j.version)})}</b>${top?`<br>${esc(top.length>120?top.slice(0,117)+'…':top)}`:''}<br><span class="meta">${tr('release_notes.your_game_is_saved_automatically')}</span></div>${btn(tr('common.reload_now'),'updateNow',{},'pink sm')}${btn(tr('common.later'),'updateLater',{},'ghost sm')}`;$('update').hidden=false;
   }).catch(()=>{});
 }
